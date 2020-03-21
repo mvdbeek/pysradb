@@ -14,6 +14,16 @@ from .sradb import SRAdb
 from .utils import path_leaf
 
 
+def get(*args, **kwargs):
+    """Wraps requests.get to handle API raate limit."""
+    r = requests.get(*args, **kwargs)
+    retry_after = r.headers.get("Retry-After")
+    if retry_after:
+        time.sleep(int(retry_after))
+        return requests.get(*args, **kwargs)
+    return r
+
+
 def _order_first(df, column_order_list):
     columns = column_order_list + [
         col for col in df.columns.tolist() if col not in column_order_list
@@ -28,7 +38,7 @@ def _retry_response(base_url, payload, key, max_retries=10):
     """Rerty fetching esummary if API rate limit exceeeds"""
     for index, _ in enumerate(range(max_retries)):
         try:
-            request = requests.get(base_url, params=OrderedDict(payload))
+            request = get(base_url, params=OrderedDict(payload))
             response = request.json()
             results = response[key]
             return response
@@ -131,7 +141,7 @@ class SRAweb(SRAdb):
         """
         payload = self.ena_params.copy()
         payload += [("accession", srp)]
-        request = requests.get(self.ena_fastq_search_url, params=OrderedDict(payload))
+        request = get(self.ena_fastq_search_url, params=OrderedDict(payload))
         request_text = request.text.strip()
         # TODO: forcing this to be http protocol instead of ftp
         urls = [
@@ -200,7 +210,7 @@ class SRAweb(SRAdb):
         if isinstance(term, list):
             term = " OR ".join(term)
         payload += [("term", term)]
-        request = requests.get(self.base_url["esearch"], params=OrderedDict(payload))
+        request = get(self.base_url["esearch"], params=OrderedDict(payload))
         esearch_response = request.json()
         if "esummaryresult" in esearch_response:
             print("No result found")
@@ -220,7 +230,7 @@ class SRAweb(SRAdb):
             payload += self.create_esummary_params(esearch_response["esearchresult"])
             payload = OrderedDict(payload)
             payload["retstart"] = retstart
-            request = requests.get(
+            request = get(
                 self.base_url["esummary"], params=OrderedDict(payload)
             )
             response = request.json()
@@ -248,7 +258,7 @@ class SRAweb(SRAdb):
             term = " OR ".join(term)
         payload += [("term", term)]
 
-        request = requests.get(self.base_url["esearch"], params=OrderedDict(payload))
+        request = get(self.base_url["esearch"], params=OrderedDict(payload))
         esearch_response = request.json()
         if "esummaryresult" in esearch_response:
             print("No result found")
@@ -268,7 +278,7 @@ class SRAweb(SRAdb):
             payload += self.create_esummary_params(esearch_response["esearchresult"])
             payload = OrderedDict(payload)
             payload["retstart"] = retstart
-            request = requests.get(self.base_url["efetch"], params=OrderedDict(payload))
+            request = get(self.base_url["efetch"], params=OrderedDict(payload))
             request_text = request.text.strip()
             try:
                 request_json = request.json()
@@ -276,13 +286,7 @@ class SRAweb(SRAdb):
                 request_json = {}  # eval(request_text)
 
             if "error" in request_json:
-                # print("Encountered: {}".format(request_json))
-                # print("Headers: {}".format(request.headers))
-                # Handle API-rate limit exceeding
-                retry_after = request.headers["Retry-After"]
-                time.sleep(int(retry_after))
-                # try again
-                request = requests.get(
+                request = get(
                     self.base_url["efetch"], params=OrderedDict(payload)
                 )
                 request_text = request.text.strip()
